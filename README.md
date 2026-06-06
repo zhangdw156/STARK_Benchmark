@@ -43,13 +43,13 @@ tar -xzvf data_final.tar.gz
 ```
 mv data_final_v5/ data
 ```
-3.1 Put your openai token into key.txt
+3.1 Provide the model name and API credentials. By default the script uses the OpenAI Python SDK. For OpenAI-compatible endpoints such as vLLM, pass `--base_url` explicitly.
 ```
-echo "YOUR_OPENAI_TOKEN" >> key.txt
+python main.py --openai $m --api_key $OPENAI_API_KEY --dataset $t --index $i --mode $mode
 ```
-3.2 Begin to use
+For local vLLM:
 ```
-python main.py --openai $m --dataset $t --index $i --mode $mode
+python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY --dataset $t --index $i --mode $mode
 ```
 
 ### Explanations of arguments:
@@ -60,9 +60,10 @@ python main.py --openai $m --dataset $t --index $i --mode $mode
 ```
 --mode text
 ```
-(2) --model: Choose between ("Llama-4" "Mistral-7B" "Llama-3-8b" "deepseek-chat" "gpt-4.1" "gpt-4.5-preview" "gpt-4o" "gpt-4o-mini" "o4-mini" "o3-mini" "o3"). To use models from [together.ai](https://https://www.together.ai/pricing)(not gpt-X models from OpenAI), you will need to specify your Together.ai key in together_key.txt.
+(2) --openai: Model name sent to the OpenAI-compatible chat completions endpoint. The value is no longer rewritten by the script.
 ```
---model gpt-4o
+--openai gpt-4o
+--openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY
 ```
 (3) --index: The index of data sample provided for LLMs. *index* \in {1, ..., N}
 ```
@@ -82,7 +83,7 @@ tasks = ["loc_range", "loc_bearing", "loc_range_bearing", "loc_region", "loc_eve
 ```
 Example usage:
 ```
-python main.py --openai Llama-4 --dataset loc_range  --index 5 --mode text
+python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY --dataset loc_range --index 5 --mode text
 ```
 
 ## STARK-L Evaluation Cost

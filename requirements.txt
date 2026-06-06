@@ -1,5 +1,4 @@
 openai==1.33.0
-together
 scipy==1.15.2
 numpy==1.26.4
 transformers==4.44.2

@@ -1,5 +1,4 @@
 from openai import OpenAI
-import openai 
 from transformers import TextStreamer
 import os
 import sys
@@ -10,7 +9,6 @@ from time import sleep
 import pdb 
 import pandas as pd 
 import numpy as np 
-from together import Together
 import ast
 
 field_variable_tasks = ['spatial_impute', 'spatiotemporal_forecast', 'spatiotemporal_impute', 'temporal_impute']
@@ -69,36 +67,21 @@ def guard_imports(code_str):
 		return False, disallowed
 	return True, None
 
-def openai_api(messages, model, api_key, temperature=1, top_p=1, stop=None):
+def openai_api(messages, model, api_key, base_url=None, temperature=1, top_p=1, stop=None):
 
 	got_result = False
-	using_together = 'Llama' in model or 'Qwen' in model or 'Mistral' in model
-	using_deepseek = 'deepseek' in model
-	if using_together:
-		# client = openai.OpenAI(
-		# 	api_key=open("together_key.txt").read().strip(),
-		# 	base_url="https://api.together.xyz/v1",
-		# 	)
-		client = Together(api_key=open("together_key.txt").read().strip())
-	elif using_deepseek:
-		client = openai.OpenAI(
-			api_key=open("deepseek_key.txt").read().strip(),
-			base_url="https://api.deepseek.com",
-			)
-	else:
-		client = OpenAI(api_key=api_key)
+	client_kwargs = {"api_key": api_key}
+	if base_url:
+		client_kwargs["base_url"] = base_url
+	client = OpenAI(**client_kwargs)
 	trial = 0
-	if not using_deepseek or not using_together:
-		max_token = 2048*8 
-	else: 
-		max_token = 4096
-
+	max_token = 2048*8
 	is_stream = False if model == 'o3' else True
 
 	while not got_result and trial <= 5:
 		try:
 			trial += 1
-			if model in ('o1', 'o3-mini', 'o3', 'o4-mini') or using_deepseek or using_together:
+			if model in ('o1', 'o3-mini', 'o3', 'o4-mini'):
 				stream = client.chat.completions.create(
 					model=model,
 					messages=messages,

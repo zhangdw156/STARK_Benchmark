@@ -131,43 +131,8 @@ def save_2_csv(target_dir, name, query, answer):
 
 def main(args):
 	
-	assert args.openai in ('gpt-3.5-turbo', 'gpt-4', 'gpt-4o', 'gpt-4-0125-preview', 'o1', \
-		'o3-mini', 'gpt-4-turbo', 'gpt-4o-mini', 'gpt-4.1', 'o3', 'gpt-4.5-preview',\
-		'Llama-2-70b', 'Llama-2-13b', 'Llama-2-7b', 'Llama-3-8b', 'Llama-3-70b', \
-		'Qwen1.5-110B', 'Qwen2-72B', 'Llama-3.3-70B', 'DeepSeek-R1',\
-		'Qwen2.5-Coder-32B', 'Qwen2.5-72B', 'deepseek-chat', 'deepseek-reasoner',
-		'Qwen3-235B', 'Llama-4', 'o4-mini',
-		'Mistral-7B')
 	seed_everything(0)
-	if args.openai == 'Llama-3.3-70B':
-		prefix = 'meta-llama/'
-		args.openai = prefix + args.openai + '-Instruct-Turbo-Free'
-	elif args.openai == 'Llama-4':
-		prefix = 'meta-llama/'
-		args.openai = prefix + args.openai + '-Maverick-17B-128E-Instruct-FP8'
-	elif 'Llama' in args.openai:
-		prefix = 'meta-llama/'
-		args.openai = prefix + args.openai + '-chat-hf'
-	elif args.openai == 'Qwen2.5-72B':
-		prefix = 'Qwen/'
-		args.openai = prefix + args.openai + '-Instruct-Turbo'
-	elif 'Qwen2' in args.openai:
-		prefix = 'Qwen/'
-		args.openai = prefix + args.openai + '-Instruct'
-	elif 'Qwen3' in args.openai:
-		prefix = 'Qwen/'
-		args.openai = prefix + args.openai + '-A22B-fp8-tput'
-	elif 'Mistral' in args.openai:
-		prefix = 'mistralai/'
-		args.openai = prefix + args.openai + '-Instruct-v0.2'
-	
-	if 'gpt' in args.openai or 'o1' in args.openai or 'o3' in args.openai or 'o4' in args.openai:
-		openai_key = open("key.txt").read().strip()
-	elif 'deepseek' in args.openai:
-		openai_key = open("deepseek_key.txt").read().strip()
-	else:
-		openai_key = open("together_key.txt").read().strip()
-
+	openai_key = args.api_key or os.environ.get("OPENAI_API_KEY") or "EMPTY"
 	os.environ["OPENAI_API_KEY"] = openai_key
 
 	AgentPrompt = select_instruction_prompts(args)

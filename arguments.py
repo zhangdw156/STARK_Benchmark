@@ -63,7 +63,12 @@ def get_arguments():
         """
     )
     parser.add_argument(
-        "--base_url", type=str, default="https://api.together.xyz/v1", help="together.ai interface"
+        "--base_url", type=str, default=None,
+        help="OpenAI-compatible API base URL. If set, use the OpenAI Python SDK against this endpoint without model-name rewriting."
+    )
+    parser.add_argument(
+        "--api_key", type=str, default=None,
+        help="API key for the OpenAI-compatible endpoint. Defaults to OPENAI_API_KEY, then EMPTY for local vLLM."
     )
     parser.add_argument(
         "--log_name", type=str, default="test", help="The type of task we are testing."

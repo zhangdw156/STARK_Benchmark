@@ -109,7 +109,15 @@ class OpenAIAgent:
 
 	def step(self, stop=None):
 		# chat = openai_api(self.chat, self.model, temperature=self.temperature, top_p=self.top_p, stop="```\n")
-		message = openai_api(self.chat, self.model, self.api_key, temperature=self.temperature, top_p=self.top_p, stop=stop)
+		message = openai_api(
+			self.chat,
+			self.model,
+			self.api_key,
+			base_url=self.args.base_url,
+			temperature=self.temperature,
+			top_p=self.top_p,
+			stop=stop,
+		)
 		# message = chat.choices[0].message.content
 		if "```Python" in message or "```python" in message:
 			message += "```\n"
