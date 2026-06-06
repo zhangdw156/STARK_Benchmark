@@ -33,6 +33,8 @@ key.txt
 together_key.txt
 conv_history/
 results/
+results_npy/
+logs/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
