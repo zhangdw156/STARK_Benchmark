@@ -4,6 +4,7 @@
 #
 # Quick start from the repository root on the evaluation server:
 #
+#   uv sync
 #   chmod +x scripts/run_parallel_eval.sh
 #
 #   scripts/run_parallel_eval.sh \
@@ -62,7 +63,6 @@ Common options:
                              Task suite to run. Default: all
   --task TASK                Run one task; can be repeated. Overrides --suite/--tasks-file.
   --tasks-file FILE          Read tasks from a file, one task per line.
-  --python BIN               Python executable. Default: PYTHON_BIN, ./venv/bin/python if present, python3, then python
   --ts-len N                 Forwarded to main.py for online tracking tasks. Default: TS_LEN or 10
   --noise-level LEVEL        Forwarded to main.py. Default: NOISE_LEVEL or normal
   --limit N                  Run at most N indices per task, useful for smoke tests.
@@ -91,7 +91,6 @@ MODE=${MODE:-text}
 JOBS=${JOBS:-8}
 SUITE=${SUITE:-all}
 TASKS_FILE=${TASKS_FILE:-}
-PYTHON_BIN=${PYTHON_BIN:-}
 TS_LEN=${TS_LEN:-10}
 NOISE_LEVEL=${NOISE_LEVEL:-normal}
 LIMIT=${LIMIT:-}
@@ -108,7 +107,6 @@ while [[ $# -gt 0 ]]; do
     --suite) SUITE=${2:?missing value for --suite}; shift 2 ;;
     --task) TASKS+=("${2:?missing value for --task}"); shift 2 ;;
     --tasks-file) TASKS_FILE=${2:?missing value for --tasks-file}; shift 2 ;;
-    --python) PYTHON_BIN=${2:?missing value for --python}; shift 2 ;;
     --ts-len) TS_LEN=${2:?missing value for --ts-len}; shift 2 ;;
     --noise-level) NOISE_LEVEL=${2:?missing value for --noise-level}; shift 2 ;;
     --limit) LIMIT=${2:?missing value for --limit}; shift 2 ;;
@@ -135,17 +133,9 @@ case "$MODE" in
   *) echo "ERROR: --mode must be text or code, got: $MODE" >&2; exit 2 ;;
 esac
 
-if [[ -z "$PYTHON_BIN" ]]; then
-  if [[ -x ./venv/bin/python ]]; then
-    PYTHON_BIN=./venv/bin/python
-  elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN=python3
-  elif command -v python >/dev/null 2>&1; then
-    PYTHON_BIN=python
-  else
-    echo "ERROR: no python executable found; pass --python /path/to/python" >&2
-    exit 2
-  fi
+if ! command -v uv >/dev/null 2>&1; then
+  echo "ERROR: uv is required. Install uv, then run: uv sync" >&2
+  exit 2
 fi
 
 if [[ ! -f main.py || ! -d data || ! -d tasks ]]; then
@@ -292,7 +282,12 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
-export MODEL BASE_URL API_KEY MODE PYTHON_BIN TS_LEN NOISE_LEVEL LOG_ROOT STATUS_ROOT
+if ! uv run --no-sync python -c "import openai, scipy, numpy, transformers, shapely, pandas, httpx, filterpy" >/dev/null 2>&1; then
+  echo "ERROR: uv environment is not ready. Run 'uv sync' from the repository root first." >&2
+  exit 2
+fi
+
+export MODEL BASE_URL API_KEY MODE TS_LEN NOISE_LEVEL LOG_ROOT STATUS_ROOT
 
 set +e
 xargs -n 2 -P "$JOBS" bash -c '
@@ -303,7 +298,7 @@ xargs -n 2 -P "$JOBS" bash -c '
   status_file="${STATUS_ROOT}/${task}__${idx}.status"
 
   echo "START task=${task} index=${idx}"
-  if "$PYTHON_BIN" main.py \
+  if uv run --no-sync python main.py \
       --openai "$MODEL" \
       --base_url "$BASE_URL" \
       --api_key "$API_KEY" \

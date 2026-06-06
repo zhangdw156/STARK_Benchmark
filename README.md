@@ -30,7 +30,7 @@
 
 ## Setup
 ```
-pip install -r requirements.txt
+uv sync
 ```
 
 ## How to use
@@ -45,11 +45,11 @@ mv data_final_v5/ data
 ```
 3.1 Provide the model name and API credentials. By default the script uses the OpenAI Python SDK. For OpenAI-compatible endpoints such as vLLM, pass `--base_url` explicitly.
 ```
-python main.py --openai $m --api_key $OPENAI_API_KEY --dataset $t --index $i --mode $mode
+uv run python main.py --openai $m --api_key $OPENAI_API_KEY --dataset $t --index $i --mode $mode
 ```
 For local vLLM:
 ```
-python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY --dataset $t --index $i --mode $mode
+uv run python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY --dataset $t --index $i --mode $mode
 ```
 
 ### Explanations of arguments:
@@ -83,7 +83,7 @@ tasks = ["loc_range", "loc_bearing", "loc_range_bearing", "loc_region", "loc_eve
 ```
 Example usage:
 ```
-python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY --dataset loc_range --index 5 --mode text
+uv run python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY --dataset loc_range --index 5 --mode text
 ```
 
 ## STARK-L Evaluation Cost

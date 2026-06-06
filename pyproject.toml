@@ -1,0 +1,19 @@
+[project]
+name = "stark-benchmark"
+version = "0.1.0"
+description = "STARK: Spatial-Temporal reAsoning benchmaRK evaluation scripts"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+dependencies = [
+  "openai==1.33.0",
+  "scipy==1.15.2",
+  "numpy==1.26.4",
+  "transformers==4.44.2",
+  "shapely==2.1.0",
+  "pandas==2.2.3",
+  "httpx==0.27.2",
+  "filterpy==1.4.5",
+]
+
+[tool.uv]
+package = false
