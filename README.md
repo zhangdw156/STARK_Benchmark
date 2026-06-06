@@ -86,6 +86,17 @@ Example usage:
 uv run python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhost:8000/v1 --api_key EMPTY --dataset loc_range --index 5 --mode text
 ```
 
+
+## Reporting results
+
+After evaluation, summarize all result CSVs under `results/` with:
+
+```
+uv run python scripts/report_results.py
+```
+
+The report script writes normalized rows, per-task summaries, per-tier summaries, missing cases, and NaN cases to `results/_reports/<timestamp>/`. For a full-suite completeness check against every task in `tasks/*.txt`, add `--expect-all-tasks`.
+
 ## STARK-L Evaluation Cost
 
 | Model| Cost per run | Provider|
