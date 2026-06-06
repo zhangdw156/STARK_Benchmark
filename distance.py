@@ -7,13 +7,15 @@ import numbers
 def string_to_np_array(string):
     """Converts a string representation of a list of lists into a NumPy array."""
     try:
+        if "</think>" in string:
+            string = string.rsplit("</think>", 1)[-1]
         # Use regex to extract the content between [RESULTS_START] and [RESULTS_END]
-        match = re.search(r"\[RESULTS_START\](.*?)\[RESULTS_END\]", string, re.DOTALL)
-        if not match:
+        matches = re.findall(r"\[RESULTS_START\](.*?)\[RESULTS_END\]", string, re.DOTALL)
+        if not matches:
             raise ValueError("No valid results found in the string.")
 
         # Extract and clean up the matched string
-        extracted_str = match.group(1).strip()
+        extracted_str = matches[-1].strip()
         
         # Standardize delimiters
         extracted_str = re.sub(r"\s+", ",", extracted_str)  # Replace spaces with commas
