@@ -32,7 +32,7 @@ data*/
 key.txt
 together_key.txt
 conv_history/
-# results/
+results/
 results_npy/
 logs/
 
