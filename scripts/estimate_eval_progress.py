@@ -60,6 +60,11 @@ class TaskProgress:
     missing: int
     total: int
     progress: float
+    score_sum: float
+    mean_score_done: float | None
+    exact_matches: int
+    exact_total: int
+    exact_match_done: float | None
 
 
 @dataclass(frozen=True)
@@ -71,6 +76,11 @@ class TierProgress:
     missing: int
     total: int
     progress: float
+    score_sum: float
+    mean_score_done: float | None
+    exact_matches: int
+    exact_total: int
+    exact_match_done: float | None
     completed_tasks: int
     started_tasks: int
     total_tasks: int
@@ -86,6 +96,11 @@ class RunProgress:
     missing: int
     total: int
     progress: float
+    score_sum: float
+    mean_score_done: float | None
+    exact_matches: int
+    exact_total: int
+    exact_match_done: float | None
     completed_tasks: int
     started_tasks: int
     total_tasks: int
@@ -163,8 +178,8 @@ def discover_model_modes(results_dir: Path, models: list[str], modes: list[str])
     return [(model, mode) for model, model_modes in sorted(discovered.items()) for mode in sorted(model_modes)]
 
 
-def finite_score_lookup(latest: pd.DataFrame) -> dict[tuple[str, str, str, int], bool]:
-    lookup: dict[tuple[str, str, str, int], bool] = {}
+def latest_score_lookup(latest: pd.DataFrame) -> dict[tuple[str, str, str, int], float | None]:
+    lookup: dict[tuple[str, str, str, int], float | None] = {}
     if latest.empty:
         return lookup
 
@@ -174,8 +189,8 @@ def finite_score_lookup(latest: pd.DataFrame) -> dict[tuple[str, str, str, int],
         except Exception:
             continue
         score = getattr(row, "score")
-        is_finite = bool(pd.notna(score) and np.isfinite(float(score)))
-        lookup[(str(row.model), str(row.mode), str(row.task), index)] = is_finite
+        finite_score = float(score) if pd.notna(score) and np.isfinite(float(score)) else None
+        lookup[(str(row.model), str(row.mode), str(row.task), index)] = finite_score
     return lookup
 
 
@@ -191,25 +206,64 @@ def format_pct(value: float) -> str:
     return f"{value * 100:.2f}%"
 
 
+def format_optional_pct(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return format_pct(value)
+
+
+def format_optional_score(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:.4f}"
+
+
+def exact_style(value: float | None) -> str:
+    if value is None:
+        return "dim"
+    if value >= 0.8:
+        return "green"
+    if value >= 0.5:
+        return "yellow"
+    return "red"
+
+
 def ratio_text(done: int, total: int) -> str:
     return f"{done:,}/{total:,}"
 
 
-def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tuple[str, str, str, int], bool]) -> RunProgress:
+def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tuple[str, str, str, int], float | None]) -> RunProgress:
     by_task: dict[tuple[str, str], dict[str, int | str]] = {}
     for case in cases:
         key = (model, mode, case.task, case.index)
         has_row = key in lookup
-        is_complete = bool(lookup.get(key, False))
+        score = lookup.get(key)
+        is_complete = score is not None
         task_key = (case.tier, case.task)
         entry = by_task.setdefault(
             task_key,
-            {"tier": case.tier, "task": case.task, "completed": 0, "observed": 0, "nonfinite": 0, "missing": 0, "total": 0},
+            {
+                "tier": case.tier,
+                "task": case.task,
+                "completed": 0,
+                "observed": 0,
+                "nonfinite": 0,
+                "missing": 0,
+                "total": 0,
+                "score_sum": 0.0,
+                "exact_matches": 0,
+                "exact_total": 0,
+            },
         )
         entry["total"] = int(entry["total"]) + 1
         if is_complete:
             entry["completed"] = int(entry["completed"]) + 1
             entry["observed"] = int(entry["observed"]) + 1
+            entry["score_sum"] = float(entry["score_sum"]) + float(score)
+            if case.tier in {"tier2", "tier3"}:
+                entry["exact_total"] = int(entry["exact_total"]) + 1
+                if float(score) == 0.0:
+                    entry["exact_matches"] = int(entry["exact_matches"]) + 1
         elif has_row:
             entry["observed"] = int(entry["observed"]) + 1
             entry["nonfinite"] = int(entry["nonfinite"]) + 1
@@ -220,6 +274,9 @@ def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tup
     for entry in by_task.values():
         completed = int(entry["completed"])
         total = int(entry["total"])
+        score_sum = float(entry["score_sum"])
+        exact_matches = int(entry["exact_matches"])
+        exact_total = int(entry["exact_total"])
         task_progress.append(
             TaskProgress(
                 tier=str(entry["tier"]),
@@ -230,6 +287,11 @@ def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tup
                 missing=int(entry["missing"]),
                 total=total,
                 progress=completed / total if total else 0.0,
+                score_sum=score_sum,
+                mean_score_done=score_sum / completed if completed else None,
+                exact_matches=exact_matches,
+                exact_total=exact_total,
+                exact_match_done=exact_matches / exact_total if exact_total else None,
             )
         )
     task_progress.sort(key=lambda item: (item.tier, item.progress, item.task))
@@ -244,6 +306,9 @@ def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tup
         nonfinite = sum(item.nonfinite for item in tier_tasks)
         missing = sum(item.missing for item in tier_tasks)
         total = sum(item.total for item in tier_tasks)
+        score_sum = sum(item.score_sum for item in tier_tasks)
+        exact_matches = sum(item.exact_matches for item in tier_tasks)
+        exact_total = sum(item.exact_total for item in tier_tasks)
         tiers.append(
             TierProgress(
                 tier=tier,
@@ -253,6 +318,11 @@ def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tup
                 missing=missing,
                 total=total,
                 progress=completed / total if total else 0.0,
+                score_sum=score_sum,
+                mean_score_done=score_sum / completed if completed else None,
+                exact_matches=exact_matches,
+                exact_total=exact_total,
+                exact_match_done=exact_matches / exact_total if exact_total else None,
                 completed_tasks=sum(1 for item in tier_tasks if item.completed >= item.total),
                 started_tasks=sum(1 for item in tier_tasks if item.observed > 0),
                 total_tasks=len(tier_tasks),
@@ -264,6 +334,9 @@ def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tup
     nonfinite = sum(item.nonfinite for item in task_progress)
     missing = sum(item.missing for item in task_progress)
     total = sum(item.total for item in task_progress)
+    score_sum = sum(item.score_sum for item in task_progress)
+    exact_matches = sum(item.exact_matches for item in task_progress)
+    exact_total = sum(item.exact_total for item in task_progress)
     return RunProgress(
         model=model,
         mode=mode,
@@ -273,6 +346,11 @@ def summarize_run(model: str, mode: str, cases: list[CaseSpec], lookup: dict[tup
         missing=missing,
         total=total,
         progress=completed / total if total else 0.0,
+        score_sum=score_sum,
+        mean_score_done=score_sum / completed if completed else None,
+        exact_matches=exact_matches,
+        exact_total=exact_total,
+        exact_match_done=exact_matches / exact_total if exact_total else None,
         completed_tasks=sum(1 for item in task_progress if item.completed >= item.total),
         started_tasks=sum(1 for item in task_progress if item.observed > 0),
         total_tasks=len(task_progress),
@@ -326,6 +404,8 @@ def render_overall(console: Console, runs: list[RunProgress]) -> None:
     table.add_column("Progress", justify="right", no_wrap=True)
     table.add_column("Bar", min_width=18)
     table.add_column("Finite", justify="right", no_wrap=True)
+    table.add_column("Mean(done)", justify="right", no_wrap=True)
+    table.add_column("Exact(done)", justify="right", no_wrap=True)
     table.add_column("Pending", justify="right", no_wrap=True)
     table.add_column("Tasks done", justify="right", no_wrap=True)
 
@@ -345,6 +425,8 @@ def render_overall(console: Console, runs: list[RunProgress]) -> None:
             Text(format_pct(run.progress), style=style),
             ProgressBar(total=1.0, completed=run.progress, width=20, complete_style=style),
             ratio_text(run.completed, run.total),
+            format_optional_score(run.mean_score_done),
+            Text(format_optional_pct(run.exact_match_done), style=exact_style(run.exact_match_done)),
             pending_text,
             ratio_text(run.completed_tasks, run.total_tasks),
         )
@@ -357,6 +439,8 @@ def render_tiers(console: Console, run: RunProgress) -> None:
     table.add_column("Progress", justify="right", no_wrap=True)
     table.add_column("Bar", min_width=20)
     table.add_column("Finite", justify="right", no_wrap=True)
+    table.add_column("Mean(done)", justify="right", no_wrap=True)
+    table.add_column("Exact(done)", justify="right", no_wrap=True)
     table.add_column("Observed", justify="right", no_wrap=True)
     table.add_column("Missing", justify="right", no_wrap=True)
     table.add_column("Nonfinite", justify="right", no_wrap=True)
@@ -369,6 +453,8 @@ def render_tiers(console: Console, run: RunProgress) -> None:
             Text(format_pct(tier.progress), style=style),
             ProgressBar(total=1.0, completed=tier.progress, width=22, complete_style=style),
             ratio_text(tier.completed, tier.total),
+            format_optional_score(tier.mean_score_done),
+            Text(format_optional_pct(tier.exact_match_done), style=exact_style(tier.exact_match_done)),
             ratio_text(tier.observed, tier.total),
             f"{tier.missing:,}",
             f"{tier.nonfinite:,}",
@@ -392,6 +478,8 @@ def render_attention(console: Console, run: RunProgress, *, top_k: int, all_task
     table.add_column("Task", overflow="fold")
     table.add_column("Finite", justify="right", no_wrap=True)
     table.add_column("Progress", justify="right", no_wrap=True)
+    table.add_column("Mean(done)", justify="right", no_wrap=True)
+    table.add_column("Exact(done)", justify="right", no_wrap=True)
     table.add_column("Missing", justify="right", no_wrap=True)
     table.add_column("Nonfinite", justify="right", no_wrap=True)
     table.add_column("Status")
@@ -403,6 +491,8 @@ def render_attention(console: Console, run: RunProgress, *, top_k: int, all_task
             task.task,
             ratio_text(task.completed, task.total),
             Text(format_pct(task.progress), style=style),
+            format_optional_score(task.mean_score_done),
+            Text(format_optional_pct(task.exact_match_done), style=exact_style(task.exact_match_done)),
             f"{task.missing:,}",
             f"{task.nonfinite:,}",
             status_text(task),
@@ -412,7 +502,7 @@ def render_attention(console: Console, run: RunProgress, *, top_k: int, all_task
 
 def make_console() -> Console:
     probe = Console()
-    return Console(width=max(probe.size.width, 120))
+    return Console(width=max(probe.size.width, 160))
 
 
 def render_report(args: argparse.Namespace, cases: list[CaseSpec], runs: list[RunProgress]) -> None:
@@ -458,7 +548,7 @@ def main() -> None:
 
     raw, skipped = load_results(args.results_dir, set(models) if models else None, set(modes) if modes else None)
     latest = latest_rows(raw)
-    lookup = finite_score_lookup(latest)
+    lookup = latest_score_lookup(latest)
     runs = [summarize_run(model, mode, cases, lookup) for model, mode in model_modes]
     runs.sort(key=lambda item: (item.model, item.mode))
 
