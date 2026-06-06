@@ -31,7 +31,11 @@
 #     --task loc_range \
 #     --limit 5
 #
-# Generate and inspect jobs without running evaluation:
+# By default, the script is resume-aware: it skips cases that already have a
+# non-NaN result row under results/<model>/<mode>/ and only schedules missing
+# or NaN cases. Use --force to rerun every generated case.
+#
+# Generate and inspect pending jobs without running evaluation:
 #
 #   scripts/run_parallel_eval.sh \
 #     --model 你的_vllm_model_name \
@@ -66,7 +70,8 @@ Common options:
   --ts-len N                 Forwarded to main.py for online tracking tasks. Default: TS_LEN or 10
   --noise-level LEVEL        Forwarded to main.py. Default: NOISE_LEVEL or normal
   --limit N                  Run at most N indices per task, useful for smoke tests.
-  --dry-run                  Only print generated jobs; do not run evaluation.
+  --force                    Rerun all generated cases instead of skipping completed cases.
+  --dry-run                  Only print pending jobs; do not run evaluation.
   -h, --help                 Show this help.
 
 Examples:
@@ -95,6 +100,7 @@ TS_LEN=${TS_LEN:-10}
 NOISE_LEVEL=${NOISE_LEVEL:-normal}
 LIMIT=${LIMIT:-}
 DRY_RUN=0
+FORCE=0
 TASKS=()
 
 while [[ $# -gt 0 ]]; do
@@ -110,6 +116,7 @@ while [[ $# -gt 0 ]]; do
     --ts-len) TS_LEN=${2:?missing value for --ts-len}; shift 2 ;;
     --noise-level) NOISE_LEVEL=${2:?missing value for --noise-level}; shift 2 ;;
     --limit) LIMIT=${2:?missing value for --limit}; shift 2 ;;
+    --force|--rerun-completed) FORCE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -222,8 +229,15 @@ collect_tasks() {
 
 RUN_ID=$(date '+%Y%m%d_%H%M%S')
 LOG_ROOT="logs/parallel_eval/${RUN_ID}"
+if [[ -e "$LOG_ROOT" ]]; then
+  RUN_ID="${RUN_ID}_$$"
+  LOG_ROOT="logs/parallel_eval/${RUN_ID}"
+fi
 STATUS_ROOT="${LOG_ROOT}/status"
+CANDIDATE_JOBS_FILE="${LOG_ROOT}/all_jobs.tsv"
 JOBS_FILE="${LOG_ROOT}/jobs.tsv"
+RESUME_STATUS_FILE="${LOG_ROOT}/resume_status.tsv"
+SKIPPED_JOBS_FILE="${LOG_ROOT}/skipped_completed.tsv"
 mkdir -p "$LOG_ROOT" "$STATUS_ROOT"
 
 # Pre-create directories touched by parallel workers to avoid startup races.
@@ -232,7 +246,7 @@ mkdir -p \
   "results_npy/$MODEL/$MODE" \
   "conv_history/$MODEL/$MODE"
 
-: > "$JOBS_FILE"
+: > "$CANDIDATE_JOBS_FILE"
 while IFS= read -r task; do
   [[ -z "$task" ]] && continue
   if ! dir=$(task_data_dir "$task"); then
@@ -247,7 +261,7 @@ while IFS= read -r task; do
   count=0
   while IFS= read -r idx; do
     [[ -z "$idx" ]] && continue
-    printf '%s %s\n' "$task" "$idx" >> "$JOBS_FILE"
+    printf '%s %s\n' "$task" "$idx" >> "$CANDIDATE_JOBS_FILE"
     count=$((count + 1))
     if [[ -n "$LIMIT" && "$count" -ge "$LIMIT" ]]; then
       break
@@ -259,11 +273,119 @@ while IFS= read -r task; do
   fi
 done < <(collect_tasks)
 
-TOTAL_JOBS=$(wc -l < "$JOBS_FILE" | tr -d '[:space:]')
-if [[ "$TOTAL_JOBS" -eq 0 ]]; then
+GENERATED_JOBS=$(wc -l < "$CANDIDATE_JOBS_FILE" | tr -d '[:space:]')
+if [[ "$GENERATED_JOBS" -eq 0 ]]; then
   echo "ERROR: no jobs generated" >&2
   exit 2
 fi
+
+if [[ "$FORCE" -eq 1 ]]; then
+  cp "$CANDIDATE_JOBS_FILE" "$JOBS_FILE"
+  : > "$SKIPPED_JOBS_FILE"
+  printf 'status\ttask\tindex\treason\tresult_file\tscore\n' > "$RESUME_STATUS_FILE"
+  while read -r task idx; do
+    [[ -z "${task:-}" ]] && continue
+    printf 'pending\t%s\t%s\tforce_rerun\t\t\n' "$task" "$idx" >> "$RESUME_STATUS_FILE"
+  done < "$CANDIDATE_JOBS_FILE"
+else
+  uv run --no-sync python - \
+    "$MODEL" "$MODE" "$NOISE_LEVEL" \
+    "$CANDIDATE_JOBS_FILE" "$JOBS_FILE" "$SKIPPED_JOBS_FILE" "$RESUME_STATUS_FILE" <<'PY'
+import csv
+import math
+import sys
+from pathlib import Path
+
+model, mode, noise_level, candidates_path, jobs_path, skipped_path, status_path = sys.argv[1:]
+
+online_tasks = {
+    "track_range_online",
+    "track_bearing_online",
+    "track_range_bearing_online",
+    "track_region_online",
+    "track_event_spatio_online",
+    "track_event_temp_online",
+    "track_event_spatiotemp_online",
+}
+
+
+def result_path(task: str, index: str) -> Path:
+    if task in online_tasks:
+        name = f"{task}_{index}.csv"
+    else:
+        name = f"{task}_{index}_{noise_level}.csv"
+    return Path("results") / model / mode / name
+
+
+def latest_valid_score(path: Path, task: str, index: str):
+    if not path.exists():
+        return None, "missing_result_file"
+    if path.stat().st_size == 0:
+        return None, "empty_result_file"
+
+    try:
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames is None:
+                return None, "missing_header"
+            required = {"index", "task", "score"}
+            missing = required - set(reader.fieldnames)
+            if missing:
+                return None, "missing_columns:" + ",".join(sorted(missing))
+
+            matching_rows = []
+            for row in reader:
+                try:
+                    row_index = int(row.get("index", ""))
+                except Exception:
+                    continue
+                if str(row.get("task", "")) == task and row_index == int(index):
+                    matching_rows.append(row)
+    except Exception as exc:
+        return None, f"read_error:{type(exc).__name__}"
+
+    if not matching_rows:
+        return None, "no_matching_result_row"
+
+    raw_score = str(matching_rows[-1].get("score", "")).strip()
+    try:
+        score = float(raw_score)
+    except Exception:
+        return None, "non_numeric_score"
+    if not math.isfinite(score):
+        return None, "non_finite_score"
+    return raw_score, "completed"
+
+
+pending = []
+skipped = []
+status_rows = []
+
+for raw_line in Path(candidates_path).read_text().splitlines():
+    if not raw_line.strip():
+        continue
+    task, index = raw_line.split(maxsplit=1)
+    path = result_path(task, index)
+    score, reason = latest_valid_score(path, task, index)
+    if score is None:
+        pending.append((task, index))
+        status_rows.append(("pending", task, index, reason, str(path), ""))
+    else:
+        skipped.append((task, index))
+        status_rows.append(("completed", task, index, reason, str(path), score))
+
+Path(jobs_path).write_text("".join(f"{task} {index}\n" for task, index in pending))
+Path(skipped_path).write_text("".join(f"{task} {index}\n" for task, index in skipped))
+
+with Path(status_path).open("w", newline="") as f:
+    writer = csv.writer(f, delimiter="\t")
+    writer.writerow(["status", "task", "index", "reason", "result_file", "score"])
+    writer.writerows(status_rows)
+PY
+fi
+
+TOTAL_JOBS=$(wc -l < "$JOBS_FILE" | tr -d '[:space:]')
+SKIPPED_JOBS=$(wc -l < "$SKIPPED_JOBS_FILE" | tr -d '[:space:]')
 
 cat <<EOF
 STARK parallel evaluation
@@ -271,14 +393,24 @@ STARK parallel evaluation
   base_url   : $BASE_URL
   mode       : $MODE
   jobs       : $JOBS
-  total jobs : $TOTAL_JOBS
+  resume     : $([[ "$FORCE" -eq 1 ]] && echo disabled || echo enabled)
+  generated  : $GENERATED_JOBS
+  completed  : $SKIPPED_JOBS
+  pending    : $TOTAL_JOBS
   jobs file  : $JOBS_FILE
+  all jobs   : $CANDIDATE_JOBS_FILE
+  resume log : $RESUME_STATUS_FILE
   logs dir   : $LOG_ROOT
 EOF
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  echo "Dry run jobs:"
+  echo "Dry run pending jobs:"
   cat "$JOBS_FILE"
+  exit 0
+fi
+
+if [[ "$TOTAL_JOBS" -eq 0 ]]; then
+  echo "No pending jobs: all generated cases already have non-NaN results."
   exit 0
 fi
 
