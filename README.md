@@ -89,6 +89,14 @@ uv run python main.py --openai qwen3-4b-instruct-2507 --base_url http://localhos
 
 ## Reporting results
 
+Check resumable evaluation progress without writing report files:
+
+```
+uv run python scripts/estimate_eval_progress.py
+```
+
+The progress script renders Rich tables for every `results/<model>/<mode>/` run. It uses the same completion rule as `scripts/run_parallel_eval.sh`: a case is complete only when the latest matching result row has a finite numeric score. Filter the denominator with options such as `--suite tier2`, `--task loc_range`, `--limit 5`, `--model <model>`, and `--mode text`; add `--json` for machine-readable output.
+
 After evaluation, summarize all result CSVs under `results/` with:
 
 ```
